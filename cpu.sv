@@ -13,10 +13,10 @@
 // 
 // Dependencies: 
 // 
-// Revision: 04/11/2024 6:00:00 AM
+// Revision:
 // Revision 0.01 - File Created
 // Additional Comments:
-// Working form of CPU for Lab 5
+// 
 //////////////////////////////////////////////////////////////////////////////////
 
 module cpu(
@@ -296,7 +296,7 @@ module cpu(
                     
                     3'b001: begin 
                         case (funct7_ex)
-                            7'b0000000: result = read_data_ex << read_data_ex2;  // SLL
+                            7'b0000000: result = read_data_ex << read_data_ex2[4:0];  // SLL
                         endcase
                     end
                     
@@ -334,8 +334,8 @@ module cpu(
                     
                     3'b101: begin 
                         case (funct7_ex)
-                            7'b0000000: result = read_data_ex >> read_data_ex2;  // SRL
-                            7'b0100000: result = $signed(read_data_ex) >>> read_data_ex2;  // SRA
+                            7'b0000000: result = read_data_ex >> read_data_ex2[4:0];  // SRL
+                            7'b0100000: result = $signed(read_data_ex) >>> read_data_ex2[4:0];  // SRA
                         endcase
                     end
                     
@@ -387,7 +387,7 @@ module cpu(
             
             if (iw_valid) begin             
                 data_trace_file = $fopen("beya.txt", "a");
-                $fwrite(data_trace_file, "Clock Counter: %d, Register %d: %d\n", clock_counter, addr_wb, result_wb);
+                $fwrite(data_trace_file, "Clock Counter: %d, Register %d: %h\n", clock_counter, addr_wb, result_wb);
                 $fclose(data_trace_file);
             end
             
