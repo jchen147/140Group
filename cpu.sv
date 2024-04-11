@@ -13,10 +13,10 @@
 // 
 // Dependencies: 
 // 
-// Revision:
+// Revision: 04/11/2024 6:00:00 AM
 // Revision 0.01 - File Created
 // Additional Comments:
-// 
+// Working form of CPU for Lab 5
 //////////////////////////////////////////////////////////////////////////////////
 
 module cpu(
@@ -39,13 +39,14 @@ module cpu(
     // Register File Registers
     reg [4:0] write_addr, write_addr_ex, write_addr_mem, write_addr_wb, addr_wb;        
     reg [4:0] read_addr;                                        
-    reg [31:0] read_data, read_data_ex;                                       
+    reg [31:0] read_data, read_data2, read_data_ex, read_data_ex2;                                       
     
     // Decode stage registers
-    reg [6:0] opcode;
-    reg [4:0] rd_prev, rd_prev2, rd_prev3, rd;
+    reg [6:0] opcode, opmem;
+    reg [4:0] rd_prev, rd_prev2, rd_prev3, rd2_prev, rd2_prev2, rd2_prev3, rd;
     reg [2:0] funct3, funct3_de, funct3_ex;
-    reg [4:0] rs1;
+    reg [6:0] funct7, funct7_de, funct7_ex;
+    reg [4:0] rs1, rs2;
     reg [11:0] immediate;
     reg [31:0] immediate_extended, immediate_extended_ex;
     
@@ -59,12 +60,13 @@ module cpu(
     reg hazard, data_hazard;
 
     // Register File
-    reg [10:0] register_file [7:0];
+    reg [31:0] register_file [31:0];
+
 
     // Initialize files for trace data
     initial begin
         // Initialize PC and registers
-        for(int i = 0; i < 10; i = i + 1) begin
+        for(int i = 0; i < 14; i = i + 1) begin
             register_file[i] = 0;
         end
         PC <= 0;
@@ -101,36 +103,88 @@ module cpu(
         if(!rst_n) begin
             id_valid <= 0;
         end else if(if_valid) begin
-            opcode <= instruction[6:0];
-            rd <= instruction[11:7];
-            funct3 <= instruction[14:12];
-            rs1 <= instruction[19:15];
-            immediate <= instruction[31:20];
+            case(instruction[6:0]) 
+                7'b0010011: begin   // I-Type
+                    opcode <= instruction[6:0];
+                    rd <= instruction[11:7];
+                    funct3 <= instruction[14:12];
+                    rs1 <= instruction[19:15];
+                    immediate <= instruction[31:20];
+                end
+                7'b0110011: begin   // R-Type
+                    opcode <= instruction[6:0];
+                    rd <= instruction[11:7];
+                    funct3 <= instruction[14:12];
+                    rs1 <= instruction[19:15];
+                    rs2 <= instruction[24:20];
+                    funct7 <= instruction[31:25];
+                end
+            endcase
             
             id_valid <= 1;            
         end
     end
 
     always_comb begin
-        if (rd_prev == rs1 || rd_prev2 == rs1 || rd_prev3 == rs1) begin 
-            data_hazard = 1;
+        case(opcode) 
+            7'b0010011: begin   // I-Type
+                if (rd_prev == rs1 || rd_prev2 == rs1 || rd_prev3 == rs1) begin 
+                    data_hazard = 1;
+                            
+                    if (rd_prev == rs1) begin
+                        read_data = result;    
+                    end else if (rd_prev2 == rs1) begin
+                        read_data = result_mem;
+                    end else if (rd_prev3 == rs1) begin
+                        read_data = result_haz;
+                    end 
+                           
+                end else begin 
+                    data_hazard = 0;
+                    read_data = register_file[rs1]; 
+                end
+                   
+                immediate_extended = {{20{immediate[11]}}, immediate};
+                funct3_de = funct3;     
+                write_addr = rd;
+            end
                 
-            if (rd_prev == rs1) begin
-                read_data = result;    
-            end else if (rd_prev2 == rs1) begin
-                read_data = result_mem;
-            end else if (rd_prev3 == rs1) begin
-                read_data = result_haz;
+            7'b0110011: begin   // R-Type
+            
+                if (rd_prev == rs1) begin 
+                    read_data = result;
+                    data_hazard = 1;
+                end else if (rd_prev2 == rs1) begin
+                    read_data = result_mem; 
+                    data_hazard = 1;
+                end else if (rd_prev3 == rs1) begin
+                    read_data = result_haz; 
+                    data_hazard = 1;
+                end else begin 
+                    data_hazard = 0;
+                    read_data = register_file[rs1];
+                end
+                
+                if (rd_prev == rs2) begin 
+                    read_data2 = result; 
+                    data_hazard = 1;
+                end else if (rd_prev2 == rs2) begin
+                    read_data2 = result_mem;
+                    data_hazard = 1;
+                end else if (rd_prev3 == rs2) begin
+                    read_data2 = result_haz;
+                    data_hazard = 1;
+                end else begin 
+                    data_hazard = 0;
+                    read_data2 = register_file[rs2];
+                end
+                    
+                funct7_de = funct7;
+                funct3_de = funct3;     
+                write_addr = rd;
             end 
-                
-        end else begin 
-            data_hazard = 0;
-            read_data = register_file[rs1]; 
-        end
-             
-        funct3_de = funct3;     
-        write_addr = rd;
-        immediate_extended = {{20{immediate[11]}}, immediate};
+            
+        endcase     
     end
 
 
@@ -139,70 +193,169 @@ module cpu(
         if(!rst_n) begin
             ie_valid = 0;
         end else if(id_valid) begin
-            read_data_ex <= read_data; 
-            write_addr_ex <= write_addr;
-            immediate_extended_ex <= immediate_extended;
-            funct3_ex <= funct3_de;
-
-            rd_prev <= write_addr;
-            rd_prev2 <= rd_prev;
-            rd_prev3 <= rd_prev2;
-            
+            case(opcode) 
+                7'b0010011: begin   // I-Type
+                    read_data_ex <= read_data; 
+                    write_addr_ex <= write_addr;
+                    immediate_extended_ex <= immediate_extended;
+                    funct3_ex <= funct3_de;
+        
+                    rd_prev <= write_addr;
+                    rd_prev2 <= rd_prev;
+                    rd_prev3 <= rd_prev2;
+                end
+                    
+                7'b0110011: begin   // R-Type
+                    read_data_ex <= read_data; 
+                    read_data_ex2 <= read_data2; 
+                    
+                    write_addr_ex <= write_addr;
+                    funct7_ex <= funct7_de;
+                    funct3_ex <= funct3_de;
+        
+                    rd_prev <= write_addr;
+                    rd_prev2 <= rd_prev;
+                    rd_prev3 <= rd_prev2;
+                    
+                    rd2_prev <= write_addr;
+                    rd2_prev2 <= rd_prev;
+                    rd2_prev3 <= rd_prev2;
+                end 
+            endcase     
+           
+            opmem <= opcode;
             ie_valid <= 1;
         end 
     end
 
     always_comb begin 
-        case (funct3_ex)
-            // ADDI
-            3'b000: result = immediate_extended_ex + read_data_ex; 
+        case(opmem) 
+            7'b0010011: begin   // I-Type
             
-            // SLTI (Set Less Than Immediate)
-            3'b010: begin
-                if (signed'(read_data_ex) < signed'(immediate_extended_ex)) begin
-                    result = 32'h1;
-                end else begin
-                    result = 32'h0;
-                end
-            end
-            
-            // SLTIU (Set Less Than Immediate Unsigned)
-            3'b011: begin
-                if (read_data_ex < immediate_extended_ex) begin
-                    result = 32'h1;
-                end else begin
-                    result = 32'h0;
-                end
-            end
-            
-            // XORI (Bitwise XOR Immediate)
-            3'b100: result = read_data_ex ^ immediate_extended_ex;
-            
-            // ORI (Bitwise OR Immediate)
-            3'b110: result = read_data_ex | immediate_extended_ex;
-            
-            // ANDI (Bitwise AND Immediate)
-            3'b111: result = read_data_ex & immediate_extended_ex;
-            
-            3'b001: 
-                case (immediate_extended_ex[11:5])
-                    // SLLI (Shift Left Logical Immediate)
-                    7'b0000000: result = read_data_ex << immediate_extended_ex[4:0];
-                endcase
-            
-            3'b101: begin
-                case (immediate_extended_ex[11:5])
-                    // SRLI (Shift Right Logical Immediate)
-                    7'b0000000: result = read_data_ex >> immediate_extended_ex[4:0];
+                case (funct3_ex)
+                    // ADDI
+                    3'b000: result = immediate_extended_ex + read_data_ex; 
                     
-                    // SRAI (Shift Right Arithmetic Immediate)
-                    7'b0100000:result = $signed(read_data_ex) >>> immediate_extended_ex[4:0]; 
-                endcase
+                    // SLTI (Set Less Than Immediate)
+                    3'b010: begin
+                        if (signed'(read_data_ex) < signed'(immediate_extended_ex)) begin
+                            result = 32'h1;
+                        end else begin
+                            result = 32'h0;
+                        end
+                    end
+                    
+                    // SLTIU (Set Less Than Immediate Unsigned)
+                    3'b011: begin
+                        if (read_data_ex < immediate_extended_ex) begin
+                            result = 32'h1;
+                        end else begin
+                            result = 32'h0;
+                        end
+                    end
+                    
+                    // XORI (Bitwise XOR Immediate)
+                    3'b100: result = read_data_ex ^ immediate_extended_ex;
+                    
+                    // ORI (Bitwise OR Immediate)
+                    3'b110: result = read_data_ex | immediate_extended_ex;
+                    
+                    // ANDI (Bitwise AND Immediate)
+                    3'b111: result = read_data_ex & immediate_extended_ex;
+                    
+                    3'b001: 
+                        case (immediate_extended_ex[11:5])
+                            // SLLI (Shift Left Logical Immediate)
+                            7'b0000000: result = read_data_ex << immediate_extended_ex[4:0];
+                        endcase
+                    
+                    3'b101: begin
+                        case (immediate_extended_ex[11:5])
+                            // SRLI (Shift Right Logical Immediate)
+                            7'b0000000: result = read_data_ex >> immediate_extended_ex[4:0];
+                            
+                            // SRAI (Shift Right Arithmetic Immediate)
+                            7'b0100000:result = $signed(read_data_ex) >>> immediate_extended_ex[4:0]; 
+                        endcase
+                    end
+                    
+                    default: result = 32'h0; // Default case
+                endcase      
+                  
             end
-            
-            default: result = 32'h0; // Default case
-        endcase
-
+                    
+            7'b0110011: begin   // R-Type
+                case (funct3_ex) 
+                    
+                    3'b000: begin
+                        case (funct7_ex)
+                            7'b0000000: result = read_data_ex + read_data_ex2;  // ADD
+                            7'b0100000: result = read_data_ex - read_data_ex2;   // SUB                 
+                        endcase
+                    end
+                    
+                    3'b001: begin 
+                        case (funct7_ex)
+                            7'b0000000: result = read_data_ex << read_data_ex2;  // SLL
+                        endcase
+                    end
+                    
+                    // SLT
+                    3'b010: begin 
+                        case (funct7_ex)
+                            7'b0000000: begin 
+                                if (signed'(read_data_ex) < signed'(read_data_ex2)) begin
+                                    result = 32'h1;
+                                end else begin
+                                    result = 32'h0;
+                                end
+                            end
+                        endcase
+                    end
+                    
+                    // SLTU
+                    3'b011: begin 
+                        case (funct7_ex)
+                            7'b0000000: begin 
+                                if (unsigned'(read_data_ex) < unsigned'(read_data_ex2)) begin
+                                    result = 32'h1;
+                                end else begin
+                                    result = 32'h0;
+                                end
+                            end
+                        endcase
+                    end
+                    
+                    3'b100: begin 
+                        case (funct7_ex)
+                            7'b0000000: result = read_data_ex ^ read_data_ex2;  // XOR
+                        endcase
+                    end
+                    
+                    3'b101: begin 
+                        case (funct7_ex)
+                            7'b0000000: result = read_data_ex >> read_data_ex2;  // SRL
+                            7'b0100000: result = $signed(read_data_ex) >>> read_data_ex2;  // SRA
+                        endcase
+                    end
+                    
+                    3'b110: begin 
+                        case (funct7_ex)
+                            7'b0000000: result = read_data_ex | read_data_ex2;  // OR
+                        endcase
+                    end
+                    
+                    3'b111: begin 
+                        case (funct7_ex)
+                            7'b0000000: result = read_data_ex & read_data_ex2;  // AND
+                        endcase
+                    end
+                    
+                    default: result = 32'h0; // Default case
+                endcase 
+            end 
+        endcase    
+       
         write_addr_mem = write_addr_ex;
     end
 
@@ -234,13 +387,12 @@ module cpu(
             
             if (iw_valid) begin             
                 data_trace_file = $fopen("beya.txt", "a");
-                $fwrite(data_trace_file, "Clock Counter: %d, Register %d: %h\n", clock_counter, addr_wb, result_wb);
+                $fwrite(data_trace_file, "Clock Counter: %d, Register %d: %d\n", clock_counter, addr_wb, result_wb);
                 $fclose(data_trace_file);
             end
             
             iw_valid = 1;
         end
     end
-    
     
 endmodule
