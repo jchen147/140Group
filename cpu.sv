@@ -3,7 +3,7 @@
 // Company: 
 // Engineer: 
 // 
-// Create Date: 04/02/2024 06:11:12 AM
+// Create Date: 05/09/2024 06:11:12 AM
 // Design Name: 
 // Module Name: cpu
 // Project Name: 
@@ -40,7 +40,7 @@ module cpu(
     // Register File Registers
     reg [4:0] write_addr, write_addr_ex, write_addr_mem, write_addr_wb, addr_wb;        
     reg [4:0] read_addr;                                        
-    reg [31:0] read_data, read_data2, read_data_ex, read_data_ex2;                                       
+    reg [31:0] read_data, read_data2, read_data_ex, read_data_ex2;                                      
     
     // Decode stage registers
     reg [6:0] opcode, opmem;
@@ -142,7 +142,34 @@ module cpu(
                     rs2 <= instruction[24:20];
                     immediate_store <= instruction[31:25];         
                 end
-
+                7'b0110111: begin // LUI
+                    opcode <= instruction[6:0];
+                    rd <= instruction[11:7];
+                    immediate_extended <= {instruction[31:12], 12'b0};
+                end
+                7'b0010111: begin // AUIPC
+                    opcode <= instruction[6:0];
+                    rd <= instruction[11:7];
+                    immediate_extended <= {instruction[31:12], 12'b0};
+                end
+                7'b1101111: begin // JAL
+                    opcode <= instruction[6:0];
+                    rd <= instruction[11:7];
+                    immediate_extended <= {{11{instruction[31]}}, instruction[31], instruction[19:12], instruction[20], instruction[30:21], 1'b0};
+                end
+                7'b1100111: begin// JALR
+                    opcode <= instruction[6:0];
+                    rs1 <= instruction[19:15];
+                    rd <= instruction[11:7];
+                    funct3 <= instruction[14:12];
+                    immediate_extended <= {{20{instruction[31]}}, instruction[31:20]};
+                end
+                7'b1100011: begin // Branch instructions (BEQ, BNE, BLT, BGE, BLTU, BGEU)
+                    funct3 <= instruction[14:12];
+                    rs1 <= instruction[19:15];
+                    rs2 <= instruction[24:20];
+                    immediate_extended <= {{19{instruction[31]}}, instruction[31], instruction[7],instruction[30:25], instruction[11:8], 1'b0};
+                end
             endcase
             
             dmem_addr_de <= 0;
@@ -352,6 +379,28 @@ module cpu(
                     offset_mem = offset_ex;
                     immem = imex;
                 end
+
+                // Conditional PC update based on branching or jumping
+                7'b1101111: // JAL
+                    PC <= PC + immediate_extended_ex; // Jump and link
+                7'b1100111: // JALR
+                    PC <= (read_data_ex + immediate_extended_ex) & ~1; // JALR target address
+                7'b1100011: begin // Branch instructions
+                    case (funct3_ex)
+                        3'b000: if (read_data_ex == read_data_ex2) PC <= PC + immediate_extended_ex; // BEQ
+                        3'b001: if (read_data_ex != read_data_ex2) PC <= PC +
+ immediate_extended_ex; // BNE
+                        3'b100: if ($signed(read_data_ex) < $signed(read_data_ex2)) PC <= PC +
+ immediate_extended_ex; // BLT
+                        3'b101: if ($signed(read_data_ex) >= $signed(read_data_ex2)) PC <= PC +
+ immediate_extended_ex; // BGE
+                        3'b110: if (read_data_ex < read_data_ex2) PC <= PC +
+ immediate_extended_ex; // BLTU
+                        3'b111: if (read_data_ex >= read_data_ex2) PC <= PC +
+ immediate_extended_ex; // BGEU
+                    endcase
+                end
+
             endcase     
            
             dmem_addr_ex <= dmem_addr_de;
@@ -485,39 +534,20 @@ module cpu(
                         endcase
                     end
                     
+                    7'b0110111: // LUI
+                        result = immediate_extended_ex;
+                    7'b0010111: // AUIPC
+                        result = PC + immediate_extended_ex - 4;
+                    7'b1101111: // JAL
+                        result = PC + 4;
+                    7'b1100111: // JALR
+                        result = PC + 4;
+
                     default: result = 32'h0; // Default case
                     
                 endcase
             end
                 
-                
-//            // Load Instructions
-//            7'b0000011: begin
-            
-//                dmem_addr = read_data_ex + offset_mem;  // Calculate the memory address for load operation
-//                dmem_wen = 0;                           // Disable write enable for load operation
-            
-//                case(funct3_ex)
-//                    3'b000: byte_en = 4'b0001;          // LB (load byte)
-//                    3'b001: byte_en = 4'b0011;          // LH (load halfword)
-//                    3'b010: byte_en = 4'b1111;          // LW (load word)
-//                    default: byte_en = 4'b0000;         // Default case
-//                endcase
-//            end 
-            
-//            // Store Instructions
-//            7'b0100011: begin 
-//                dmem_addr <= read_data_ex + offset_mem; // Calculate the memory address for store operation
-//                dmem_data <= read_data_ex2;             // Set data to be written to memory
-                
-//                case(funct3_ex)
-//                    3'b000: byte_en <= 4'b0001;     // SB (store byte)
-//                    3'b001: byte_en <= 4'b0011;     // SH (store halfword)
-//                    3'b010: byte_en <= 4'b1111;     // SW (store word)
-//                    default: byte_en <= 4'b0000;    // Default case
-//                endcase
-//            end
-            
         endcase    
        
         write_addr_mem = write_addr_ex;
@@ -531,14 +561,6 @@ module cpu(
             byte_en <= 4'b0000;
         end else if(ie_valid) begin  
         
-//            if (opmem == 7'b0000011) begin
-//                result_mem <= dmem_data; // For loads, result_mem should be the data read from memory
-//                dmem_wen <= 0;
-//            end else begin
-//                result_mem <= result;
-//                dmem_wen <= 1;
-//            end
-
             if (opmem == 7'b0100011) begin          // Store instruction
                 case (funct3_ex)
                     3'b000: byte_en <= 4'b0001;     // SB
@@ -571,10 +593,7 @@ module cpu(
 
                 dmem_wen <= 0;  
             end
-        
-//            result_haz <= result_mem; 
-//            write_addr_wb <= write_addr_mem; 
-            
+
             im_valid <= 1;
         end
     end
@@ -584,10 +603,7 @@ module cpu(
     always @(posedge clk) begin
         if(!rst_n) begin
             iw_valid = 0;
-//        end else if(im_valid && dmem_wen) begin
         end else if(im_valid) begin
-//            result_wb <= result_mem;
-//            addr_wb <= write_addr_wb;
             
             register_file[addr_wb] <= result_wb; 
             
